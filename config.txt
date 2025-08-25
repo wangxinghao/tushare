@@ -1,0 +1,3 @@
+box_hight = 0
+box_low = 0
+#人工干预配置
