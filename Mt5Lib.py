@@ -21,7 +21,7 @@ def shutdown():
     mt5.shutdown()
     
 def positions_get(symbol):
-    mt5.positions_get(symbol=symbol)
+    return mt5.positions_get(symbol=symbol)
 
 
 # 发送订单
