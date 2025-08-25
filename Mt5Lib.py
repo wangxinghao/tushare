@@ -7,6 +7,22 @@ import logging
 
 logger = logging.getLogger('app')
 
+TIMEFRAME_M15 = mt5.TIMEFRAME_M15
+TIMEFRAME_M1 = mt5.TIMEFRAME_M1
+TIMEFRAME_M5 = mt5.TIMEFRAME_M5
+ORDER_TYPE_BUY = mt5.ORDER_TYPE_BUY
+ORDER_TYPE_SELL = mt5.ORDER_TYPE_SELL
+
+POSITION_TYPE_BUY = mt5.POSITION_TYPE_BUY
+POSITION_TYPE_SELL = mt5.POSITION_TYPE_SELL
+
+
+def shutdown():
+    mt5.shutdown()
+    
+def positions_get(symbol):
+    mt5.positions_get(symbol=symbol)
+
 
 # 发送订单
 def send_order(symbol, volume, order_type):
@@ -28,7 +44,7 @@ def send_order(symbol, volume, order_type):
         "symbol": symbol,
         "volume": volume,
         "type": order_type,
-        "price": tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid,
+        "price": tick.ask if order_type == ORDER_TYPE_BUY else tick.bid,
         "deviation": 1,  # 允许的滑点(点)
         "type_time": mt5.ORDER_TIME_GTC,  # 订单有效期: 永久有效
         "type_filling": mt5.ORDER_FILLING_FOK,  # 成交方式: 立即全部成交否则取消
@@ -54,7 +70,7 @@ def close_position(symbol, ticket, order_type, volume):
     volume: 交易量
     """
     # 确定平仓类型 (买单用卖价平仓，卖单用买价平仓)
-    close_type = mt5.ORDER_TYPE_SELL if order_type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+    close_type = mt5.ORDER_TYPE_SELL if order_type == ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
     
     # 获取当前报价
     tick = mt5.symbol_info_tick(symbol)

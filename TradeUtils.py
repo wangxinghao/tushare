@@ -5,13 +5,13 @@ import logging
 logger = logging.getLogger('app')
 
 
-def wait_for_time(hasVolumn, current_price, boder_hight = 0, boder_low = 0):
+def wait_for_time(hasposition, current_price, boder_hight = 0, boder_low = 0):
     
     if boder_hight == 0 and boder_low == 0:
         logger.info(f"boder未生效,休眠 60 秒")
         time.sleep(60)
         return
-    if hasVolumn:
+    if hasposition:
         logger.info(f"有仓位,休眠 5 秒")
         time.sleep(5)
         return
@@ -255,6 +255,9 @@ def check_and_calculate_box(df15, box_period):
     
     logger.info(f"箱体区间: {box_low} - {box_high}")
     logger.info(f"调整后区间: {min_value} - {max_value}")
+    if max_value - min_value < 3: 
+        logger.info("箱体区间过小less than 3")
+        return None, None
     
     return (max_value, min_value)
     
