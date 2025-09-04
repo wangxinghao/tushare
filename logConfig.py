@@ -1,4 +1,5 @@
 import logging
+import re
 from logging.handlers import TimedRotatingFileHandler
 
 
@@ -21,7 +22,9 @@ def setup_logger():
     )
     
     # 设置轮转后的文件后缀（默认是YYYY-MM-DD）
-    handler.suffix = "%Y-%m-%d.log"
+    handler.suffix = "%Y-%m-%d"
+    handler.extMatch = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
     
     # 创建格式化器并添加到处理器
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

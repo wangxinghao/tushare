@@ -1,5 +1,6 @@
 import time
 import logging
+import Mt5Lib
 
 
 logger = logging.getLogger('app')
@@ -162,11 +163,11 @@ def calculate_box(df, box_period):
     box_period: 箱体形成的周期数
     """
     if len(df) < box_period:
-        return None, None
+        return None, None, None
     
     # 取最近box_period根K线计算箱体
-    box_data = df[:-1][:box_period]
-    # 提取每根K线的上轨线区间[实体上沿, 最高价]
+    box_data = df.iloc[-(box_period+1):-1]    # 提取每根K线的上轨线区间[实体上沿, 最高价]
+    print(box_data)
     upper_ranges = []
     # 提取每根K线的下轨线区间[最低价, 实体下沿]
     lower_ranges = []
@@ -220,7 +221,7 @@ def calculate_box(df, box_period):
             overlap_start = max(range1[0], range2[0])
             overlap_end = min(range1[1], range2[1])
             
-            # 如果有重合
+            # 如果有重合GOBAL_BOX_PERIOD
             if overlap_start <= overlap_end:
                 # 在重合区间内添加所有可能的重合点（这里简化为添加端点）
                 lower_overlapping_points.add(overlap_start)
@@ -228,43 +229,359 @@ def calculate_box(df, box_period):
     
     # 如果没有重合点，返回None
     if not upper_overlapping_points or not lower_overlapping_points:
-        return None, None
+        return None, None,box_data
     # 上轨线之间重叠两个点的集合的最高点
     box_high = max(upper_overlapping_points)
     # 下轨线之间重叠两个点的集合的最低点
     box_low = min(lower_overlapping_points)
-    return box_high, box_low
+    return box_high, box_low, box_data
 
-def check_and_calculate_box(df15, box_period):
-    box_high, box_low = calculate_box(df15, box_period)
-    box_data = df15[:-1][:box_period]
-    print(box_data)
+def check_and_calculate_box(df15, box_period, min_box_size):
+    box_high, box_low, box_data = calculate_box(df15, box_period)
+        
     max_value = max(box_data['close'].max(),box_data['open'].max())
     min_value = min(box_data['close'].min(),box_data['open'].min())
     
-    if box_high is not None and  max_value > box_high + 1:
+    if box_high is not None and  max_value > box_high:
         pass
     else:
         max_value = box_high
     
     # Calculate min_value based on condition
-    if box_low is not None and min_value < box_low - 1:
+    if box_low is not None and min_value < box_low:
         pass
     else:
         min_value = box_low
     
     logger.info(f"箱体区间: {box_low} - {box_high}")
     logger.info(f"调整后区间: {min_value} - {max_value}")
-    if max_value - min_value < 3: 
-        logger.info("箱体区间过小less than 3")
+    if max_value - min_value < min_box_size: 
+        logger.info(f"箱体区间过小less than {min_box_size}")
         return None, None
     
-    return (max_value, min_value)
+    return max_value, min_value
     
     
+def find_high_peaks_with_2_point_window(df, current_price, n_peaks=2):
+    """
+    Find peaks in the 'high' column where each peak is higher than 2 points before and after it,
+    with the first peak higher than current price and second peak higher than first peak by at least 1 point.
+    df: DataFrame with 'high' column
+    current_price: Current price to compare with first peak
+    n_peaks: Number of peaks to find (default 2)
+    Returns: List of peaks with their values, indices and times
+    """
+    if len(df) < 5:  # Need at least 5 points (2 before + 1 peak + 2 after)
+        return []
+    
+    peaks = []
+    
+    # Iterate from back to front, but ensuring we have 2 points before and after
+    # Start from index 2 and end at len(df) - 3 to ensure we have enough points
+    for i in range(len(df) - 3, 1, -1):  # From len(df)-3 down to 2
+        current_high = df.iloc[i]['high']
+        is_peak = True
+        
+        # Check if current point is higher than 2 points before and after
+        for j in range(i - 2, i + 3):  # Check 2 before, self, and 2 after
+            if j != i and df.iloc[j]['high'] >= current_high:
+                is_peak = False
+                break
+        
+        # Additional conditions for specific peak requirements
+        if is_peak:
+            # For the first peak, it must be higher than current price
+            if len(peaks) == 0 and current_high > current_price:
+                peaks.append({
+                    'value': current_high,
+                    'index': i,
+                    'time': df.iloc[i]['time']
+                })
+            # For the second peak, it must be higher than the first peak by at least 1 point
+            elif len(peaks) == 1 and current_high > (peaks[0]['value'] + 1):
+                peaks.append({
+                    'value': current_high,
+                    'index': i,
+                    'time': df.iloc[i]['time']
+                })
+            
+            # If we found the required number of peaks, break
+            if len(peaks) == n_peaks:
+                break
+    
+    return peaks
 
     
+def find_low_troughs_with_2_point_window(df, current_price, n_troughs=2):
+    """
+    Find troughs in the 'low' column where each trough is lower than 2 points before and after it,
+    with the first trough lower than current price and second trough lower than first trough by at least 1 point.
+    df: DataFrame with 'low' column
+    current_price: Current price to compare with first trough
+    n_troughs: Number of troughs to find (default 2)
+    Returns: List of troughs with their values, indices and times
+    """
+    if len(df) < 5:  # Need at least 5 points (2 before + 1 trough + 2 after)
+        return []
     
+    troughs = []
+    
+    # Iterate from back to front, but ensuring we have 2 points before and after
+    # Start from index 2 and end at len(df) - 3 to ensure we have enough points
+    for i in range(len(df) - 3, 1, -1):  # From len(df)-3 down to 2
+        current_low = df.iloc[i]['low']
+        is_trough = True
+        
+        # Check if current point is lower than 2 points before and after
+        for j in range(i - 2, i + 3):  # Check 2 before, self, and 2 after
+            if j != i and df.iloc[j]['low'] <= current_low:
+                is_trough = False
+                break
+        
+        # Additional conditions for specific trough requirements
+        if is_trough:
+            # For the first trough, it must be lower than current price
+            if len(troughs) == 0 and current_low < current_price:
+                troughs.append({
+                    'value': current_low,
+                    'index': i,
+                    'time': df.iloc[i]['time']
+                })
+            # For the second trough, it must be lower than the first trough by at least 1 point
+            elif len(troughs) == 1 and current_low < (troughs[0]['value'] - 1):
+                troughs.append({
+                    'value': current_low,
+                    'index': i,
+                    'time': df.iloc[i]['time']
+                })
+            
+            # If we found the required number of troughs, break
+            if len(troughs) == n_troughs:
+                break
+    
+    return troughs
+
+def process_target_prices(target_prices):
+    """
+    Process target prices according to the specified rules:
+    - If target_prices is None, return (0, 0)
+    - If target_prices has 1 element, return (first_value, 0)
+    - If target_prices has 2 elements, return (first_value, second_value)
+    
+    Args:
+        target_prices: List of price objects with 'value' attribute, or None
+    
+    Returns:
+        tuple: (first_price, second_price)
+    """
+    # If target_prices is None, return (0, 0)
+    if target_prices is None:
+        return (0, 0)
+    
+    # If target_prices is empty, return (0, 0)
+    if len(target_prices) == 0:
+        return (0, 0)
+    
+    # If target_prices has 1 element, return (first_value, 0)
+    if len(target_prices) == 1:
+        return (target_prices[0]['value'], 0)
+    
+    # If target_prices has 2 or more elements, return (first_value, second_value)
+    if len(target_prices) >= 2:
+        return (target_prices[0]['value'], target_prices[1]['value'])
+    
+    # This shouldn't be reached, but just in case
+    return (0, 0)
+
+
+def calculate_box(df, box_period):
+    """
+    计算箱体的最高价和最低价（基于重叠最多的区间）
+    df: K线数据DataFrame，包含open, high, low, close字段
+    box_period: 箱体形成的周期数
+    """
+    if len(df) < box_period:
+        return None, None, None
+    
+    # 取最近box_period根K线计算箱体
+    box_data = df.iloc[-(box_period+1):-1]    # 提取每根K线的上轨线区间[实体上沿, 最高价]
+    print(box_data)
+    upper_ranges = []
+    # 提取每根K线的下轨线区间[最低价, 实体下沿]
+    lower_ranges = []
+    
+    for i in range(len(box_data) - 1):
+        row = box_data.iloc[i]
+        open_price = row['open']
+        close_price = row['close']
+        high_price = row['high']
+        low_price = row['low']
+        
+        # 实体上沿（开盘价和收盘价中的较高者）
+        entity_top = max(open_price, close_price)
+        # 实体下沿（开盘价和收盘价中的较低者）
+        entity_bottom = min(open_price, close_price)
+        
+        # 上轨线区间 [实体上沿, 最高价]
+        upper_ranges.append((entity_top, high_price))
+        # 下轨线区间 [最低价, 实体下沿]
+        lower_ranges.append((low_price, entity_bottom))
+    
+    # 找出上轨线之间的重合点
+    upper_overlapping_points = set()
+    
+    # 两两比较上轨线区间
+    for i in range(len(upper_ranges)):
+        for j in range(i + 1, len(upper_ranges)):
+            range1 = upper_ranges[i]
+            range2 = upper_ranges[j]
+            
+            # 找到两个区间的重合部分
+            overlap_start = max(range1[0], range2[0])
+            overlap_end = min(range1[1], range2[1])
+            
+            # 如果有重合
+            if overlap_start <= overlap_end:
+                # 在重合区间内添加所有可能的重合点（这里简化为添加端点）
+                upper_overlapping_points.add(overlap_start)
+                upper_overlapping_points.add(overlap_end)
+    
+    # 找出下轨线之间的重合点
+    lower_overlapping_points = set()
+    
+    # 两两比较下轨线区间
+    for i in range(len(lower_ranges)):
+        for j in range(i + 1, len(lower_ranges)):
+            range1 = lower_ranges[i]
+            range2 = lower_ranges[j]
+            
+            # 找到两个区间的重合部分
+            overlap_start = max(range1[0], range2[0])
+            overlap_end = min(range1[1], range2[1])
+            
+            # 如果有重合GOBAL_BOX_PERIOD
+            if overlap_start <= overlap_end:
+                # 在重合区间内添加所有可能的重合点（这里简化为添加端点）
+                lower_overlapping_points.add(overlap_start)
+                lower_overlapping_points.add(overlap_end)
+    
+    # 如果没有重合点，返回None
+    if not upper_overlapping_points or not lower_overlapping_points:
+        return None, None,box_data
+    # 上轨线之间重叠两个点的集合的最高点
+    box_high = max(upper_overlapping_points)
+    # 下轨线之间重叠两个点的集合的最低点
+    box_low = min(lower_overlapping_points)
+    return box_high, box_low, box_data
+
+def _calculate_proximity_score(reference_price, df, price_column, threshold_ratio=0.1):
+    """辅助函数：计算接近参考价格的K线比例"""
+    price_range = df[price_column].max() - df[price_column].min()
+    if price_range == 0:
+        return 0, 0  # 避免除以零
+    
+    threshold = price_range * threshold_ratio
+    near_reference = df[abs(df[price_column] - reference_price) <= threshold]
+    ratio = len(near_reference) / len(df)
+    return ratio, near_reference
+
+def _analyze_volume(near_bars, all_bars,proximity_ratio):
+    """辅助函数：分析参考价格附近的成交量情况"""
+    if near_bars.empty:
+        return 0
+    
+    avg_vol_near = near_bars['ticket_volume'].mean()
+    avg_vol_overall = all_bars['ticket_volume'].mean()
+        
+    return avg_vol_near > (proximity_ratio * avg_vol_overall)
+
+def _analyze_candlestick_patterns(near_bars, is_bullish_analysis):
+    """辅助函数：分析参考价格附近的K线形态"""
+    if near_bars.empty:
+        return 0, 0
+    
+    # 计算上/下影线和实体大小
+    near_bars = near_bars.copy()
+    near_bars['upper_shadow'] = near_bars.apply(
+        lambda row: max(0, row['high'] - max(row['open'], row['close'])), axis=1
+    )
+    near_bars['lower_shadow'] = near_bars.apply(
+        lambda row: max(0, min(row['open'], row['close']) - row['low']), axis=1
+    )
+    near_bars['body_size'] = near_bars.apply(
+        lambda row: abs(row['close'] - row['open']), axis=1
+    )
+    
+    # 根据是上涨还是下跌分析，关注不同的影线
+    if is_bullish_analysis:
+        # 上涨分析关注长上影线（抛压）
+        pattern_bars = near_bars[
+            (near_bars['upper_shadow'] > near_bars['body_size'] * 1.5) & 
+            (near_bars['body_size'] > 0)
+        ]
+    else:
+        # 下跌分析关注长下影线（买盘）
+        pattern_bars = near_bars[
+            (near_bars['lower_shadow'] > near_bars['body_size'] * 1.5) & 
+            (near_bars['body_size'] > 0)
+        ]
+    
+    pattern_count = len(pattern_bars)
+    return pattern_count
+
+def _analyze_recent_bars(df, reference_price, price_column, threshold_ratio=0.1, recent_period=5):
+    """辅助函数：分析近期K线的表现"""
+    recent_bars = df.tail(recent_period)
+    price_range = df[price_column].max() - df[price_column].min()
+    threshold = price_range * threshold_ratio if price_range != 0 else 0
+    
+    near_recent = recent_bars[abs(recent_bars[price_column] - reference_price) <= threshold]
+    recent_ratio = len(near_recent) / recent_period
+    recent_score = min(20, recent_ratio * 20)
+    return recent_score, len(near_recent)
+
+def calculate_resistance(box_low, box_high, df, current):
+    direction = None
+
+    border_limit = 0.1 * (box_high - box_low)
+
+    if current["close"] - box_low < border_limit and box_high - current["close"] > border_limit: 
+        direction = "down"
+    elif current["close"] - box_low > border_limit and box_high - current["close"] < border_limit: 
+        direction = "up"
+    
+    required_columns = ['high', 'low', 'close', 'open', 'ticket_volume']
+    if not all(col in df.columns for col in required_columns):
+        raise ValueError(f"df必须包含以下列: {required_columns}")
+    
+    if direction not in ['up', 'down']:
+        raise ValueError("direction参数必须是'up'或'down'")
+    
+    # 初始化阻力因素和评分
+    is_bullish = (direction == 'up')
+    reference_price = box_high if is_bullish else box_low
+    price_column = 'high' if is_bullish else 'low'
+    
+    # 1. 计算接近箱体边界的K线比例 
+    proximity_ratio, near_bars = _calculate_proximity_score(
+        reference_price, df, price_column
+    )
+    if proximity_ratio <= 0:
+        return None
+    
+    # 2. 分析在箱体边界附近的成交量情况是不是比均值大
+    vol_ratio_flag = _analyze_volume(near_bars, df, proximity_ratio)
+        
+    # 3. 分析在箱体边界附近的K线形态 (0-25分)
+    pattern_count = _analyze_candlestick_patterns(near_bars, is_bullish)
+
+    current_pattern_count = _analyze_candlestick_patterns(current, is_bullish)
+
+    #有其他K线在箱体线附件，放量在均值以上，且有影线
+    if pattern_count > 0 and vol_ratio_flag and proximity_ratio>0 and current_pattern_count> 0:
+        logger.info("箱体线附近有K线，且成交量高，有K线形态，有影线，有均值以上,当前根为影线，可做单")
+        return Mt5Lib.ORDER_TYPE_SELL if is_bullish else Mt5Lib.ORDER_TYPE_BUY
+    return None
     
     
     
